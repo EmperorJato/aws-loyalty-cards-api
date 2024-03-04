@@ -1,0 +1,6 @@
+MyFirstSQS:
+  Type: AWS::SQS::Queue
+  Properties:
+    QueueName: loyalty-card-sqs-${self:provider.stage}
+    DelaySeconds: 1
+    MaximumMessageSize: 1024

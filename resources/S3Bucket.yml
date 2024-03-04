@@ -1,0 +1,5 @@
+S3Bucket:
+  Type: AWS::S3::Bucket
+  Properties: 
+    BucketName: loyalty-card-s3-bucket-${self:provider.stage}
+     

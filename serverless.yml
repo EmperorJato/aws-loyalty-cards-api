@@ -1,0 +1,172 @@
+service: loyalty-cards-api
+frameworkVersion: "3"
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'ap-northeast-1'}
+  memorySize: 128
+  logRetentionInDays: 1
+  environment:
+    REGION: ${self:provider.region}
+    LOYALTY_CARD_TABLE: !Ref LoyaltyCardsTable
+    LOYALTY_CARD_SQS: !Ref MySQS
+    ACCOUNT_ID: !Ref AWS::AccountId
+    LOYALTY_CARD_BUCKET: !Ref S3Bucket
+  httpApi:
+    cors:
+      allowedOrigins:
+        - http://localhost:3000
+      allowedHeaders:
+        - Content-Type
+        - Accept
+        - Authorization
+      allowedMethods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+      allowCredentials: true
+      maxAge: 6000
+    authorizers:
+      tokenAuth:
+        type: request
+        functionName: tokenAuthorizer
+        identitySource:
+          - $request.header.Authorization
+      jwtTokenAuth:
+        type: jwt
+        identitySource: $request.header.Authorization
+        audience: ${self:custom.COGNITO_USER_POOL_CLIENT}
+        issuerUrl:
+          !Join [
+            "",
+            [
+              "https://cognito-idp.",
+              "${opt:region, self:provider.region}",
+              ".amazonaws.com/",
+              "${self:custom.COGNITO_USER_POOL_ID}",
+            ],
+          ]
+
+functions:
+  tokenAuthorizer:
+    handler: src/authorizers/tokenAuthorizer.handler
+  loyaltyCardFunction:
+    handler: src/handlers/loyalty-card.handler
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:GetItem
+          - dynamodb:PutItem
+          - dynamodb:UpdateItem
+          - dynamodb:DeleteItem
+        Resource:
+          - !GetAtt LoyaltyCardsTable.Arn
+    events:
+      - httpApi:
+          path: /loyalty-card
+          method: POST
+          authorizer: tokenAuth
+      - httpApi:
+          path: /loyalty-card
+          method: GET
+          authorizer: tokenAuth
+      - httpApi:
+          path: /loyalty-card
+          method: PUT
+          authorizer: tokenAuth
+      - httpApi:
+          path: /loyalty-card
+          method: DELETE
+          authorizer: tokenAuth
+  loyaltyCardsFunction:
+    handler: src/handlers/loyalty-cards.handler
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Query
+          - dynamodb:Scan
+        Resource:
+          - !GetAtt LoyaltyCardsTable.Arn
+    events:
+      - httpApi:
+          path: /loyalty-cards
+          method: GET
+          authorizer: tokenAuth
+  uploadLoyatyCard:
+    handler: src/handlers/loyalty-cards-upload.handler
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - s3:PutObject
+          - s3:GetObject
+          - s3:AbortMultipartUpload
+          - s3:ListBucket
+          - s3:DeleteObject
+          - s3:GetObjectVersion
+          - s3:ListMultipartUploadParts
+          - sqs:SendMessage
+          - sqs:ListQueues
+        Resource:
+          - !GetAtt S3Bucket.Arn
+          - !Join ["", [!GetAtt S3Bucket.Arn, "/*"]]
+          - !GetAtt MySQS.Arn
+    events:
+      - httpApi:
+          path: /loyalty-card/upload
+          method: POST
+          authorizer: tokenAuth
+  senderLoyaltyCards:
+    handler: src/handlers/loyalty-cards-sender.handler
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - s3:PutObject
+          - s3:GetObject
+          - s3:AbortMultipartUpload
+          - s3:ListBucket
+          - s3:DeleteObject
+          - s3:GetObjectVersion
+          - s3:ListMultipartUploadParts
+          - sqs:SendMessage
+          - sqs:ListQueues
+        Resource:
+          - !GetAtt S3Bucket.Arn
+          - !Join ["", [!GetAtt S3Bucket.Arn, "/*"]]
+          - !GetAtt MySQS.Arn
+    events:
+      - s3:
+          bucket: !Ref S3Bucket
+          event: s3:ObjectCreated:*
+          existing: true
+  receiverLoyaltyCards:
+    handler: src/handlers/loyalty-cards-receiver.handler
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:PutItem
+          - sqs:ReceiveMessage
+        Resource:
+          - !GetAtt LoyaltyCardsTable.Arn
+          - !GetAtt MySQS.Arn
+    events:
+      - sqs:
+          arn: !GetAtt MySQS.Arn
+
+resources:
+  Resources:
+    LoyaltyCardsTable: ${file(resources/LoyaltyCardsTable.yml):LoyaltyCardsTable}
+    CognitoUserPool: ${file(resources/Cognito.yml):CognitoUserPool}
+    CognitoUserPoolClient: ${file(resources/Cognito.yml):CognitoUserPoolClient}
+    CognitoUserPoolDomain: ${file(resources/Cognito.yml):CognitoUserPoolDomain}
+    S3Bucket: ${file(resources/S3Bucket.yml):S3Bucket}
+    MySQS: ${file(resources/MySQS.yml):MyFirstSQS}
+
+plugins:
+  - serverless-iam-roles-per-function
+
+custom:
+  COGNITO_USER_POOL_ID: !Ref CognitoUserPool
+  COGNITO_USER_POOL_CLIENT: !Ref CognitoUserPoolClient

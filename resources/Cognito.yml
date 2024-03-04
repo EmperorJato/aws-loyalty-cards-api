@@ -1,0 +1,30 @@
+CognitoUserPool:
+  Type: AWS::Cognito::UserPool
+  Properties:
+    UserPoolName: LoyaltyCardUserPool-${self:provider.stage}
+    UsernameAttributes:
+      - email
+
+CognitoUserPoolClient:
+  Type: AWS::Cognito::UserPoolClient
+  Properties:
+    UserPoolId: !Ref CognitoUserPool
+    ClientName: WebClient-${self:provider.stage}
+    AllowedOAuthFlowsUserPoolClient: true
+    AllowedOAuthScopes:
+      - email
+      - profile
+      - openid
+    SupportedIdentityProviders:
+      - COGNITO
+    AllowedOAuthFlows:
+      - implicit
+    CallbackURLs:
+      - http://localhost:3000
+    DefaultRedirectURI: http://localhost:3000
+
+CognitoUserPoolDomain:
+  Type: AWS::Cognito::UserPoolDomain
+  Properties:
+    Domain: loyaltycard-${self:provider.stage}
+    UserPoolId: !Ref CognitoUserPool
